@@ -47,7 +47,7 @@ VPNGATE_MIRROR = os.environ.get(
     "VPNGATE_MIRROR",
     "https://raw.githubusercontent.com/fdciabdul/Vpngate-Scraper-API/main/json/data.json",
 )
-WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://fco.us.ci/check?sstp=vpn:vpn@")
+WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://fox168.cc.cd/check?sstp=vpn:vpn@")
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))
@@ -55,12 +55,12 @@ HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "60"))
 PUBLIC_DIR = os.environ.get("PUBLIC_DIR", os.path.join(REPO_DIR, "public"))
 TEMPLATE_HTML = os.path.join(REPO_DIR, "web", "index.html")
 
-CHAIN_URL = os.environ.get("CHAIN_URL", "https://MianFeiWeiRuan.github.io/Gate/chains.txt")
-HOSTS_URL = os.environ.get("HOSTS_URL", "https://MianFeiWeiRuan.github.io/Gate/hosts.txt")
-NODES_URL = os.environ.get("NODES_URL", "https://MianFeiWeiRuan.github.io/Gate/nodes.txt")
-SUB_URL = os.environ.get("SUB_URL", "https://MianFeiWeiRuan.github.io/Gate/sub.txt")
-EDT_UUID = os.environ.get("EDT_UUID", "dd1289f7-4fee-4504-8ed6-674456c48130")
-EDT_DOMAIN = os.environ.get("EDT_DOMAIN", "fci.us.ci")
+CHAIN_URL = os.environ.get("CHAIN_URL", "https://MianFei163.github.io/Gate/chains.txt")
+HOSTS_URL = os.environ.get("HOSTS_URL", "https://MianFei163.github.io/Gate/hosts.txt")
+NODES_URL = os.environ.get("NODES_URL", "https://MianFei163.github.io/Gate/nodes.txt")
+SUB_URL = os.environ.get("SUB_URL", "https://MianFei163.github.io/Gate/sub.txt")
+EDT_UUID = os.environ.get("EDT_UUID", "b371e4c3-dff8-4888-8ec1-6cfe0f2fe606")
+EDT_DOMAIN = os.environ.get("EDT_DOMAIN", "fox168.de5.net")
 EDT_FINGERPRINT = os.environ.get("EDT_FINGERPRINT", "chrome")
 EDGE_HOSTS = [
     h.strip() for h in os.environ.get(
