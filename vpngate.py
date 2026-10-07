@@ -5,7 +5,8 @@ VPN Gate SSTP 节点检测流水线 (精简版)
 2. 只留带 TCP 入口的 SSTP 节点
 3. 去重
 4. 并发调用 Worker 检测
-5. 生成 public/data.json + index.html + nodes.txt
+5. 生成 public/data.json + index.html + nodes.txt + sstp.txt
+6. 优选域名/IP: 优先从 EDGE_HOSTS_TXT 远程 TXT 拉取, 失败回退默认列表
 时间显示: 北京时间 (UTC+8)
 """
 
@@ -45,8 +46,8 @@ VPNGATE_MIRROR = os.environ.get(
     "VPNGATE_MIRROR",
     "https://raw.githubusercontent.com/fdciabdul/Vpngate-Scraper-API/main/json/data.json",
 )
-#(CF-Workers-CheckSocks5 更换域名)
-WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://fox168.cc.cd/check?sstp=vpn:vpn@")
+#(CF-Workers-CheckSocks5 更换域名xxxxx,暂时不需要)
+WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://xxxxxx.check?sstp=vpn:vpn@")
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))
@@ -86,14 +87,28 @@ COUNTRY_ZH = {
     "MN": "蒙古", "NP": "尼泊尔", "LK": "斯里兰卡", "MM": "缅甸",
 }
 
-# （更换优选域名，用逗号分隔）
-EDGE_HOSTS = [
+# 默认优选域名（兜底用），一行一个（内部仍以逗号连接，兼容 EDGE_HOSTS 环境变量）
+_DEFAULT_EDGE_HOSTS = [
     h.strip() for h in os.environ.get(
         "EDGE_HOSTS",
-        "ct.cloudflare.byoip.top:443,cu.cloudflare.byoip.top:443,cm.cloudflare.byoip.top:443,"
-        "yg1.ygkkk.dpdns.org:443,cf.090227.xyz:443,cloudflare.182682.xyz:443,skk.moe:443,saas.sin.fan:443",
+        ",".join([
+            "ct.cloudflare.byoip.top:443",
+            "cu.cloudflare.byoip.top:443",
+            "cm.cloudflare.byoip.top:443",
+            "yg1.ygkkk.dpdns.org:443",
+            "cf.090227.xyz:443",
+            "cloudflare.182682.xyz:443",
+            "skk.moe:443",
+            "saas.sin.fan:443",
+        ]),
     ).split(",") if h.strip()
 ]
+
+# 外部 优选域名/IP网址 TXT（一行一个 host:port），可用环境变量 EDGE_HOSTS_TXT 覆盖
+EDGE_HOSTS_TXT = os.environ.get(
+    "EDGE_HOSTS_TXT",
+    "https://bestcf.pages.dev/domain/all.txt",
+).strip()
 
 # ---------------------------------------------------------------------------
 # 日志
@@ -113,6 +128,45 @@ def log(section, msg=""):
 def die(msg):
     log("FATAL", f"[失败] {msg}")
     sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# 优选域名: 远程 TXT 加载
+# ---------------------------------------------------------------------------
+def _clean_edge_host(raw):
+    """只保留 # 之前的 host:port, 去掉任何备注（含 | 分隔的地区/机场信息）。"""
+    if not raw:
+        return ""
+    return raw.split("#", 1)[0].strip()
+
+
+def load_edge_hosts():
+    """优先从远程 TXT 拉取优选域名, 失败或为空则回退默认列表。
+    TXT 格式: 一行一个 host:port, 支持 # 注释与空行, 也支持一行逗号分隔多个。
+    会自动剥掉 # 之后的备注内容（如 "#地区随机 | 日本 JP | NRT"）。"""
+    if not EDGE_HOSTS_TXT:
+        return [_clean_edge_host(h) for h in _DEFAULT_EDGE_HOSTS if _clean_edge_host(h)]
+    try:
+        log("EDGE HOSTS", f"从 TXT 拉取: {EDGE_HOSTS_TXT}")
+        r = requests.get(EDGE_HOSTS_TXT, timeout=HTTP_TIMEOUT,
+                         headers={"User-Agent": "Mozilla/5.0 (gate-checker)"})
+        r.raise_for_status()
+        hosts = []
+        for ln in r.text.splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            for part in ln.split(","):
+                cleaned = _clean_edge_host(part)
+                if cleaned:
+                    hosts.append(cleaned)
+        if hosts:
+            log("EDGE HOSTS", f"TXT 获取到 {len(hosts)} 条优选域名")
+            return hosts
+        log("EDGE HOSTS", "TXT 内容为空, 回退默认列表")
+    except Exception as exc:
+        log("EDGE HOSTS", f"TXT 拉取失败: {exc}, 回退默认列表")
+    return [_clean_edge_host(h) for h in _DEFAULT_EDGE_HOSTS if _clean_edge_host(h)]
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +405,12 @@ def build_outputs(results, raw_count, sstp_count, source):
 
 def build_nodes_text(data):
     entry = os.environ.get("HOSTS_ENTRY", "").strip()
-    edge = [e.strip() for e in entry.split(",") if e.strip()] or EDGE_HOSTS
+    raw_edge = [e.strip() for e in entry.split(",") if e.strip()] or load_edge_hosts()
+    # 兜底：只保留 # 之前的 host:port，去掉任何备注
+    edge = [_clean_edge_host(e) for e in raw_edge if _clean_edge_host(e)]
+    if not edge:
+        edge = list(_DEFAULT_EDGE_HOSTS)
+
     lines, idx = [], 0
     ordered = sorted(data["countries"].items(),
                      key=lambda kv: (-int(kv[1].get("count") or 0), str(kv[1].get("code") or kv[0])))
@@ -370,6 +429,22 @@ def build_nodes_text(data):
                              f"$sstp://vpn:vpn@{n['host']}:{n['port']}")
                 idx += 1
     return "\n".join(lines) + "\n"
+
+
+def build_sstp_links_text(data):
+    """只输出纯 sstp:// 链接，一行一个，供 SSTP 客户端直接导入"""
+    links = []
+    ordered = sorted(data["countries"].items(),
+                     key=lambda kv: (-int(kv[1].get("count") or 0), str(kv[1].get("code") or kv[0])))
+    for cname, grp in ordered:
+        nodes = sorted(grp["nodes"],
+                       key=lambda n: (0 if n.get("residential") == "residential" else 1,
+                                      n.get("latency_ms") is None,
+                                      n.get("latency_ms") or 0,
+                                      n.get("host") or ""))
+        for n in nodes:
+            links.append(f"sstp://vpn:vpn@{n['host']}:{n['port']}")
+    return "\n".join(links) + "\n"
 
 
 def write_outputs(data):
@@ -395,7 +470,12 @@ def write_outputs(data):
     with open(nodes_path, "w", encoding="utf-8") as f:
         f.write(build_nodes_text(data))
 
-    return data_path, html_path, nodes_path
+    # 新增：纯 sstp:// 链接
+    sstp_path = os.path.join(PUBLIC_DIR, "sstp.txt")
+    with open(sstp_path, "w", encoding="utf-8") as f:
+        f.write(build_sstp_links_text(data))
+
+    return data_path, html_path, nodes_path, sstp_path
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +521,8 @@ def main():
     log("RESULT", f"可用节点: {len(success)}")
     log("RESULT", f"国家数量: {data['stats']['countries']}")
 
-    data_path, html_path, nodes_path = write_outputs(data)
-    for p in (data_path, html_path, nodes_path):
+    data_path, html_path, nodes_path, sstp_path = write_outputs(data)
+    for p in (data_path, html_path, nodes_path, sstp_path):
         log("WEBSITE", f"生成 {os.path.relpath(p, REPO_DIR)}")
     log("USAGE", f"自动轮换: 把 {NODES_URL} 填入 edgetunnel 后台「自定义优选IP」框 (每 2 小时更新)")
     log("WEBSITE", "完成 (GitHub Pages 部署由 workflow 执行)")
